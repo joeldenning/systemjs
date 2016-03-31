@@ -102,35 +102,14 @@ global.URLPolyfill = URLPolyfill;
   })();
 
   function addToError(err, msg) {
-    // parse the stack removing loader code lines for simplification
-    if (!err.originalErr) {
-      var stack = (err.stack || err.message || err).split('\n');
-      var newStack = [];
-      for (var i = 0; i < stack.length; i++) {
-        if (typeof $__curScript == 'undefined' || stack[i].indexOf($__curScript.src) == -1)
-          newStack.push(stack[i]);
-      }
+    if (err instanceof Error) {
+      err.message = msg + '\n\t' + err.message;
+      Error.call(err, err.message);
     }
-
-    var newMsg = (newStack ? newStack.join('\n\t') : err.message) + '\n\t' + msg;
-
-    // Convert file:/// URLs to paths in Node
-    if (!isBrowser)
-      newMsg = newMsg.replace(isWindows ? /file:\/\/\//g : /file:\/\//g, '');
-
-    var newErr = new Error(newMsg, err.fileName, err.lineNumber);
-    
-    // Node needs stack adjustment for throw to show message
-    if (!isBrowser)
-      newErr.stack = newMsg;
-    // Clearing the stack stops unnecessary loader lines showing
-    else
-      newErr.stack = null;
-    
-    // track the original error
-    newErr.originalErr = err.originalErr || err;
-
-    return newErr;
+    else {
+      err = msg + '\n\t' + err;
+    }
+    return err;
   }
 
   function __eval(source, debugName, context) {
@@ -168,12 +147,7 @@ global.URLPolyfill = URLPolyfill;
     throw new TypeError('No environment baseURI');
   }
 
-  try {
-    var nativeURL = new __global.URL('test:///').protocol == 'test:';
-  }
-  catch(e) {}
-
-  var URL = nativeURL ? __global.URL : __global.URLPolyfill;
+  var URL = __global.URLPolyfill || __global.URL;
 /*
 *********************************************************************************************
 
@@ -1363,15 +1337,20 @@ function getESModule(exports) {
   if (typeof exports == 'object' || typeof exports == 'function') {
     if (getOwnPropertyDescriptor) {
       var d;
-      for (var p in exports)
-        if (d = Object.getOwnPropertyDescriptor(exports, p))
-          defineProperty(esModule, p, d);
+      for (var p in exports) {
+        try {
+          if (d = Object.getOwnPropertyDescriptor(exports, p))
+            defineProperty(esModule, p, d);
+        } catch (ex) {
+          // Object.getOwnPropertyDescriptor threw an exception, fall back to normal set property.
+          normalSetProperty(esModule, exports, p);
+        }
+      }
     }
     else {
       var hasOwnProperty = exports && exports.hasOwnProperty;
       for (var p in exports) {
-        if (!hasOwnProperty || exports.hasOwnProperty(p))
-          esModule[p] = exports[p];
+        normalSetProperty(esModule, exports, p);
       }
     }
   }
@@ -1380,6 +1359,11 @@ function getESModule(exports) {
     value: true
   });
   return esModule;
+
+  function normalSetProperty(targetObj, sourceObj, propName) {
+    if (!hasOwnProperty || sourceObj.hasOwnProperty(p))
+      targetObj[propName] = sourceObj[propName];
+  }
 }
 
 function extend(a, b, prepend) {
@@ -1414,7 +1398,8 @@ function extendMeta(a, b, prepend) {
 function warn(msg) {
   if (this.warnings && typeof console != 'undefined' && console.warn)
     console.warn(msg);
-}// we define a __exec for globally-scoped execution
+}
+// we define a __exec for globally-scoped execution
 // used by module format implementations
 var __exec;
 
